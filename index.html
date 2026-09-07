@@ -77,6 +77,13 @@
     #result.win h2 { color: #3ecf8e; }
     #result.lose h2 { color: #ff8a96; }
     #result p { color: var(--muted); margin-bottom: 16px; }
+    #paused {
+      display: none; position: absolute; inset: 0; z-index: 9;
+      background: rgba(4,10,16,0.88); align-items: center; justify-content: center; text-align: center;
+    }
+    #paused.show { display: flex; }
+    #paused .card { width: min(400px, 90vw); padding: 24px; border: 1px solid #3ecf8e; border-radius: 12px; background: #101c26; }
+    #paused h2 { color: #8fd0b8; margin-bottom: 8px; }
     #chat {
       border-top: 1px solid #16323c; background: #07141c;
       display: flex; flex-direction: column; height: 96px; flex-shrink: 0;
@@ -165,6 +172,12 @@
           <button id="resultRematch" class="ok" type="button">Rematch</button>
         </div>
       </div>
+      <div id="paused">
+        <div class="card">
+          <h2>Paused</h2>
+          <p id="pausedWhy">Opponent dropped. Waiting to reconnect…</p>
+        </div>
+      </div>
     </div>
     <div id="chat">
       <div id="chatLog"></div>
@@ -188,7 +201,7 @@
   const taken = document.getElementById("taken");
 
   const API = "https://www.handyfeeling.com/api/handy/v2";
-  const W = 960, H = 640, N = 15, CELL = 34;
+  const W = 720, H = 680, N = 10, CELL = 52;
   const FLEET = [
     { name: "Dreadnought", len: 7 },
     { name: "Carrier", len: 5 }, { name: "Battleship", len: 4 },
@@ -202,6 +215,7 @@
     intensity: 0, control: null, hover: null, dir: 0, next: 0,
     view: "place", viewTo: "place", viewFade: 1,
     weapon: "single", ammo: { cross: 1, bomb: 1, control: 1 },
+    paused: false,
   };
   const me = { board: null, ships: [], ready: false };
   const them = { shots: null, ready: false, handy: true, love: true };
@@ -524,11 +538,18 @@
 
   function onMsg(msg) {
     if (!msg || !msg.type) return;
-    if (msg.type === "hello") {
-      game.msg = "Connected. Place fleets.";
+    if (game.paused && msg.type !== "hello" && msg.type !== "resume" && msg.type !== "resumeAck" && msg.type !== "toys") return;
+    if (msg.type === "hello" || msg.type === "resume") {
       send({ type: "toys", handy: !!toys.handyOn, love: !!toys.loveOn });
-      if (game.phase === "lobby") resetBoards();
+      if (msg.type === "hello" && game.phase === "lobby") {
+        game.msg = "Connected. Fleets deploying.";
+        resetBoards();
+      } else {
+        unpause("Reconnected.");
+        send({ type: "resumeAck" });
+      }
     }
+    if (msg.type === "resumeAck") unpause("Opponent is back.");
     if (msg.type === "toys") {
       them.handy = !!msg.handy;
       them.love = !!msg.love;
@@ -621,37 +642,78 @@
     addChat("them", "CPU ready. I will shoot back after misses and after control ends.");
   }
 
+  function pauseNet(why) {
+    if (net.solo) return;
+    game.paused = true;
+    stopToys();
+    const el = document.getElementById("paused");
+    el.classList.add("show");
+    document.getElementById("pausedWhy").textContent = why || "Connection lost. Pausing until both sides return.";
+    setStatus("Paused — reconnecting");
+  }
+  function unpause(msg) {
+    game.paused = false;
+    document.getElementById("paused").classList.remove("show");
+    if (msg) setStatus(msg);
+  }
+  function hookConn(c, first) {
+    net.conn = c;
+    c.on("data", onMsg);
+    c.on("close", () => { pauseNet("Opponent dropped. Auto-reconnect on…"); if (!net.host) retryJoin(); });
+    const onOpen = () => {
+      if (first && game.phase === "lobby") {
+        send({ type: "hello" });
+        resetBoards();
+        setStatus("Opponent joined " + net.code);
+      } else {
+        send({ type: "resume" });
+        unpause("Reconnected " + net.code);
+      }
+    };
+    c.on("open", onOpen);
+    if (c.open) onOpen();
+  }
   function hostRoom() {
-    const code = code6();
+    const code = (net.code || code6());
     document.getElementById("room").value = code;
     net.code = code; net.host = true;
     setStatus("Opening room " + code + "…");
+    if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
     net.peer = new Peer("fr" + code, { debug: 0 });
     net.peer.on("open", () => {
-      setStatus("Room " + code + " — waiting for opponent");
+      setStatus("Room " + code + " — waiting");
       history.replaceState({}, "", "?room=" + code);
     });
-    net.peer.on("error", (e) => setStatus("Net: " + e.type));
-    net.peer.on("connection", (c) => {
-      net.conn = c;
-      c.on("open", () => { send({ type: "hello" }); resetBoards(); setStatus("Opponent joined " + code); });
-      c.on("data", onMsg);
-      c.on("close", () => setStatus("Opponent left"));
+    net.peer.on("error", (e) => {
+      setStatus("Net: " + e.type);
+      if (e.type === "unavailable-id") setStatus("Room " + code + " still live — waiting for them");
     });
+    net.peer.on("connection", (c) => hookConn(c, game.phase === "lobby"));
+    net.peer.on("disconnected", () => { try { net.peer.reconnect(); } catch (e) {} });
   }
-  function joinRoom() {
-    const code = document.getElementById("room").value.trim().toUpperCase();
-    if (code.length < 4) return;
+  function retryJoin() {
+    if (net.host || !net.code) return;
+    clearTimeout(net.retry);
+    net.retry = setTimeout(() => joinRoom(true), 2000);
+  }
+  function joinRoom(isRetry) {
+    const code = document.getElementById("room").value.trim().toUpperCase() || net.code;
+    if (!code || code.length < 4) return;
     net.code = code; net.host = false;
-    setStatus("Joining " + code + "…");
-    net.peer = new Peer({ debug: 0 });
-    net.peer.on("open", () => {
-      net.conn = net.peer.connect("fr" + code, { reliable: true });
-      net.conn.on("open", () => { send({ type: "hello" }); resetBoards(); setStatus("Joined " + code); });
-      net.conn.on("data", onMsg);
-      net.conn.on("close", () => setStatus("Host left"));
-    });
-    net.peer.on("error", (e) => setStatus("Net: " + e.type));
+    setStatus((isRetry ? "Rejoining " : "Joining ") + code + "…");
+    if (!isRetry && net.peer) { try { net.peer.destroy(); } catch (e) {} }
+    if (!net.peer || net.peer.destroyed) {
+      net.peer = new Peer({ debug: 0 });
+      net.peer.on("error", (e) => { setStatus("Net: " + e.type); retryJoin(); });
+      net.peer.on("disconnected", () => { try { net.peer.reconnect(); } catch (e) { retryJoin(); } });
+      net.peer.on("open", () => linkToHost());
+    } else linkToHost();
+  }
+  function linkToHost() {
+    try {
+      net.conn = net.peer.connect("fr" + net.code, { reliable: true });
+      hookConn(net.conn, game.phase === "lobby");
+    } catch (e) { retryJoin(); }
   }
 
   function screenMode() {
@@ -663,7 +725,7 @@
   }
   function gridOrigin() {
     const size = N * CELL;
-    return { x: Math.floor((W - size) / 2), y: 64 };
+    return { x: Math.floor((W - size) / 2), y: 44 };
   }
   function cellAt(mx, my) {
     const o = gridOrigin();
@@ -811,7 +873,7 @@
     game.hover = cellAt(p.x, p.y);
   });
   canvas.addEventListener("click", (e) => {
-    if (game.control) return;
+    if (game.paused || game.control) return;
     const p = pointer(e);
     if (game.phase === "place") {
       const c = cellAt(p.x, p.y);
@@ -960,7 +1022,7 @@
       game.viewFade = Math.min(1, game.viewFade + dt / 4);
       if (game.viewFade >= 1) { game.view = game.viewTo; game.viewFade = 1; }
     }
-    if (game.control) {
+    if (game.control && !game.paused) {
       game.control.t -= dt;
       const left = Math.max(0, Math.ceil(game.control.t));
       document.getElementById("panelTime").textContent = fmtClock(left) + " left";

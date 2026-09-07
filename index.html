@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Fleet Remote</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    :root {
+      --bg: #07141c; --line: #1c3d4a; --text: #e7f4fb; --muted: #7ea0b3;
+      --hit: #e24b5a; --ok: #3ecf8e;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: #061018; color: var(--text); font-family: "Segoe UI", Tahoma, sans-serif; overflow: hidden; }
+    #wrap { display: flex; flex-direction: column; height: 100%; max-width: 1280px; margin: 0 auto; }
+    header { background: linear-gradient(#081820, #06141c); border-bottom: 1px solid #16323c; }
+    .bar {
+      display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+      padding: 5px 10px;
+    }
+    .bar.nav { justify-content: flex-start; }
+    .bar.toys { border-top: 1px solid #122830; padding: 4px 10px 5px; background: #07141c; }
+    .brand { display: flex; flex-direction: column; min-width: 92px; margin-right: 4px; }
+    .brand b { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+    .brand b i { font-style: normal; color: var(--ok); }
+    .brand small { display: none; }
+    .cluster { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+    input, button {
+      font: inherit; border-radius: 6px; border: 1px solid #1e4654;
+      background: #0b1c24; color: var(--text); padding: 4px 7px; font-size: 11px;
+    }
+    input.short { width: 78px; }
+    input.med { width: 128px; }
+    button { cursor: pointer; }
+    button.ok { background: #10382c; border-color: #2a7a58; color: #b7f0d4; }
+    button.danger { background: #3a1520; border-color: #7a2434; color: #ffd0d6; }
+    button[data-w].ok { background: #0e3a32; box-shadow: 0 0 0 1px #3ecf8e inset; }
+    #status { font-size: 11px; color: #7ad0a4; letter-spacing: 0.08em; }
+    #game { flex: 1; position: relative; min-height: 0; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #hud { position: absolute; inset: 8px 12px auto 12px; display: flex; justify-content: space-between; pointer-events: none; font-size: 13px; text-shadow: 0 1px 2px #000; }
+    .hint { font-size: 12px; color: var(--muted); padding: 6px 12px 8px; }
+    #panel {
+      display: none; position: absolute; left: 50%; top: 54%; transform: translate(-50%, -50%);
+      width: min(420px, 92vw); background: #101c26; border: 1px solid #3ecf8e; border-radius: 12px; padding: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.55);
+    }
+    #panel.show { display: block; }
+    #panel h2 { font-size: 16px; margin-bottom: 8px; color: #3ecf8e; }
+    #panel .bar { height: 12px; background: #12232c; border-radius: 6px; overflow: hidden; margin: 8px 0 12px; }
+    #panel .bar > div { height: 100%; background: #e24b5a; width: 0; }
+    #panel input[type=range] { width: 100%; }
+    #panel .presets { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+    #panel .toyPane { display: none; margin: 10px 0 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+    #panel .toyPane.show { display: block; }
+    #panel h3 { font-size: 13px; color: #8fd0b8; margin-bottom: 6px; letter-spacing: 0.08em; text-transform: uppercase; }
+    #taken {
+      display: none; position: absolute; left: 50%; top: 16%; transform: translateX(-50%);
+      width: min(420px, 90vw); background: rgba(48,8,16,.96); border: 1px solid #e24b5a;
+      padding: 18px 20px; border-radius: 12px; text-align: center; z-index: 6;
+    }
+    #taken.show { display: block; }
+    #taken h2 { color: #ff8a96; font-size: 18px; margin-bottom: 8px; }
+    #taken p { color: #f0d0d4; font-size: 14px; margin-bottom: 12px; }
+    #surrenderBtn { width: 100%; }
+    #result {
+      display: none; position: absolute; inset: 0; z-index: 8;
+      background: rgba(4, 10, 16, 0.86); align-items: center; justify-content: center;
+    }
+    #result.show { display: flex; }
+    #result .card {
+      width: min(440px, 92vw); background: #101c26; border: 1px solid #3ecf8e;
+      border-radius: 14px; padding: 28px 24px; text-align: center;
+    }
+    #result.lose .card { border-color: #e24b5a; }
+    #result h2 { font-size: 28px; margin-bottom: 8px; }
+    #result.win h2 { color: #3ecf8e; }
+    #result.lose h2 { color: #ff8a96; }
+    #result p { color: var(--muted); margin-bottom: 16px; }
+    #paused {
+      display: none; position: absolute; inset: 0; z-index: 9;
+      background: rgba(4,10,16,0.88); align-items: center; justify-content: center; text-align: center;
+    }
+    #paused.show { display: flex; }
+    #paused .card { width: min(400px, 90vw); padding: 24px; border: 1px solid #3ecf8e; border-radius: 12px; background: #101c26; }
+    #paused h2 { color: #8fd0b8; margin-bottom: 8px; }
+    #chat {
+      border-top: 1px solid #16323c; background: #07141c;
+      display: flex; flex-direction: column; height: 96px; flex-shrink: 0;
+    }
+    #chatLog {
+      flex: 1; overflow-y: auto; padding: 8px 16px; font-size: 13px; color: #c5d6e0;
+    }
+    #chatLog div { margin-bottom: 3px; }
+    #chatLog .me { color: #3ecf8e; }
+    #chatLog .them { color: #ff6b6b; }
+    #chatForm { display: flex; gap: 8px; padding: 8px 16px 10px; }
+    #chatForm input { flex: 1; border-radius: 8px; }
+    #chatForm button { min-width: 72px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <header>
+      <div class="bar nav">
+        <div class="brand"><b>Fleet <i>Remote</i></b><small>online command</small></div>
+        <div class="cluster">
+          <input id="room" class="short" placeholder="Room" maxlength="6" />
+          <button id="hostBtn" class="ok" type="button">Host</button>
+          <button id="joinBtn" type="button">Join</button>
+          <button id="copyBtn" type="button">Invite</button>
+          <button id="rematchBtn" type="button">Rematch</button>
+        </div>
+        <div class="cluster">
+          <button id="wSingle" class="ok" type="button" data-w="single">Shot</button>
+          <button id="wCross" type="button" data-w="cross">Cross ×1</button>
+          <button id="wBomb" type="button" data-w="bomb">Bomb ×1</button>
+          <button id="wControl" type="button" data-w="control">Ctrl ×1</button>
+          <div id="status">● Offline</div>
+        </div>
+      </div>
+      <div class="bar toys">
+        <input id="handyKey" class="med" type="password" placeholder="Handy connection key" />
+        <input id="loveIp" class="med" placeholder="Lovense IP" />
+        <input id="lovePort" class="short" placeholder="20010" />
+        <button id="toyBtn" class="ok" type="button">Connect</button>
+        <button id="stopBtn" class="danger" type="button">Stop</button>
+        <button id="placeBtn" type="button">Redeploy</button>
+      </div>
+    </header>
+    <div id="game">
+      <canvas id="c"></canvas>
+      <div id="hud"><div id="hudLeft"></div><div id="hudRight"></div></div>
+      <div id="panel">
+        <h2>Their toys are yours</h2>
+        <div id="panelTime">30s left</div>
+        <div class="bar"><div id="panelFill"></div></div>
+        <div id="handyPane" class="toyPane">
+          <h3>Handy</h3>
+          <label>Speed <span id="handyVelLab">40</span>%</label>
+          <input id="handyVel" type="range" min="0" max="100" value="40" />
+          <label>Stroke length <span id="handyStrokeLab">0–70</span></label>
+          <input id="handyStroke" type="range" min="20" max="100" value="70" />
+        </div>
+        <div id="lovePane" class="toyPane">
+          <h3>Lovense</h3>
+          <label>Vibrate <span id="loveVibeLab">8</span>/20</label>
+          <input id="loveVibe" type="range" min="0" max="20" value="8" />
+          <label>Thrust <span id="loveThrustLab">0</span>/20</label>
+          <input id="loveThrust" type="range" min="0" max="20" value="0" />
+          <div class="presets">
+            <button type="button" data-pre="pulse">Pulse</button>
+            <button type="button" data-pre="wave">Wave</button>
+            <button type="button" data-pre="fireworks">Fireworks</button>
+            <button type="button" data-pre="earthquake">Earthquake</button>
+          </div>
+        </div>
+        <div class="presets">
+          <button id="panelStart" class="ok" type="button">Start toy</button>
+          <button id="panelDone" type="button">Release early</button>
+        </div>
+      </div>
+      <div id="taken">
+        <h2>We lost control of our own toy!</h2>
+        <p>They have the remote for <span id="takenTime">0:30</span>.</p>
+        <button id="surrenderBtn" class="danger" type="button">Surrender</button>
+      </div>
+      <div id="result">
+        <div class="card">
+          <h2 id="resultTitle">You won</h2>
+          <p id="resultWhy"></p>
+          <button id="resultRematch" class="ok" type="button">Rematch</button>
+        </div>
+      </div>
+      <div id="paused">
+        <div class="card">
+          <h2>Paused</h2>
+          <p id="pausedWhy">Opponent dropped. Waiting to reconnect…</p>
+        </div>
+      </div>
+    </div>
+    <div id="chat">
+      <div id="chatLog"></div>
+      <form id="chatForm">
+        <input id="chatIn" maxlength="160" placeholder="Chat…" autocomplete="off" />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+    <div class="hint">
+      Your turn: fire on the empty ocean. Their turn: watch your fleet. Hit 30s · sink 1 min per cell.
+    </div>
+  </div>
+<script>
+(() => {
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  const statusEl = document.getElementById("status");
+  const hudL = document.getElementById("hudLeft");
+  const hudR = document.getElementById("hudRight");
+  const panel = document.getElementById("panel");
+  const taken = document.getElementById("taken");
+
+  const API = "https://www.handyfeeling.com/api/handy/v2";
+  const W = 720, H = 680, N = 10, CELL = 52;
+  const FLEET = [
+    { name: "Dreadnought", len: 7 },
+    { name: "Carrier", len: 5 }, { name: "Battleship", len: 4 },
+    { name: "Cruiser", len: 3 }, { name: "Submarine", len: 3 }, { name: "Destroyer", len: 2 },
+  ];
+
+  const net = { peer: null, conn: null, host: false, code: "", ready: false, matched: false };
+  const toys = { handyKey: "", handyOn: false, handyQ: Promise.resolve(), loveUrl: "", loveOn: false };
+  const game = {
+    phase: "lobby", turn: "self", msg: "Create a room or join one.",
+    intensity: 0, control: null, hover: null, dir: 0, next: 0,
+    view: "place", viewTo: "place", viewFade: 1,
+    weapon: "single", ammo: { cross: 1, bomb: 1, control: 1 },
+    paused: false,
+  };
+  const me = { board: null, ships: [], ready: false };
+  const them = { shots: null, ready: false, handy: true, love: true };
+  const cpu = { board: null, ships: [], hunt: [] };
+
+  function empty() { return Array.from({ length: N }, () => Array.from({ length: N }, () => ({ ship: -1, shot: 0 }))); }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function code6() { return Math.random().toString(36).slice(2, 8).toUpperCase(); }
+
+  function peerOpts() {
+    return {
+      host: "0.peerjs.com",
+      port: 443,
+      path: "/",
+      secure: true,
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+          { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" },
+        ],
+      },
+    };
+  }
+  function send(msg) {
+    if (net.solo) { setTimeout(() => cpuHear(msg), 80); return; }
+    if (net.conn && net.conn.open) net.conn.send(msg);
+  }
+
+  function setStatus(t) { statusEl.textContent = t; }
+
+  async function handyReq(method, path, body) {
+    if (!toys.handyKey) throw new Error("no handy");
+    const res = await fetch(API + path, {
+      method,
+      headers: { "Content-Type": "application/json", "X-Connection-Key": toys.handyKey },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) throw new Error("Handy " + res.status);
+    return res.json().catch(() => ({}));
+  }
+  function handyQ(fn) {
+    toys.handyQ = toys.handyQ.then(fn).catch((e) => setStatus("Handy: " + e.message));
+    return toys.handyQ;
+  }
+  async function loveCmd(action, timeSec) {
+    if (!toys.loveUrl) return;
+    await fetch(toys.loveUrl + "/command", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-platform": "FleetRemote" },
+      body: JSON.stringify({ command: "Function", action, timeSec: timeSec || 1.2, apiVer: 1 }),
+    }).catch(() => {});
+  }
+
+  async function connectToys() {
+    toys.handyKey = document.getElementById("handyKey").value.trim();
+    const ip = document.getElementById("loveIp").value.trim();
+    const port = document.getElementById("lovePort").value.trim() || "20010";
+    toys.loveUrl = ip ? ("http://" + ip + ":" + port) : "";
+    let bits = [];
+    if (toys.handyKey) {
+      try {
+        await handyReq("GET", "/info");
+        await handyReq("PUT", "/mode", { mode: 0 });
+        await handyReq("PUT", "/slide", { min: 0, max: 70 });
+        toys.handyOn = true; bits.push("Handy");
+      } catch (e) { toys.handyOn = false; bits.push("Handy fail"); }
+    }
+    if (toys.loveUrl) {
+      try {
+        const r = await fetch(toys.loveUrl + "/command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-platform": "FleetRemote" },
+          body: JSON.stringify({ command: "GetToys" }),
+        });
+        toys.loveOn = r.ok; bits.push(r.ok ? "Lovense" : "Lovense fail");
+      } catch (e) { toys.loveOn = false; bits.push("Lovense fail"); }
+    }
+    setStatus(bits.length ? bits.join(" + ") : "No toys entered");
+    send({ type: "toys", handy: !!toys.handyOn, love: !!toys.loveOn });
+  }
+
+  function applyToy(pct) {
+    applyControl({ handyVel: pct, handyMax: 70, loveVibe: Math.round(pct / 5), loveThrust: 0 });
+  }
+  function applyControl(cmd) {
+    if (toys.handyOn && cmd.handyVel != null) {
+      const vel = Math.round(clamp(cmd.handyVel, 0, 100));
+      const max = Math.round(clamp(cmd.handyMax || 70, 20, 100));
+      game.intensity = vel;
+      handyQ(async () => {
+        if (vel <= 0) { await handyReq("PUT", "/hamp/stop"); return; }
+        await handyReq("PUT", "/slide", { min: 0, max });
+        await handyReq("PUT", "/hamp/velocity", { velocity: vel });
+        await handyReq("PUT", "/hamp/start");
+      });
+    }
+    if (toys.loveOn) {
+      if (cmd.lovePreset) {
+        fetch(toys.loveUrl + "/command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-platform": "FleetRemote" },
+          body: JSON.stringify({ command: "Preset", name: cmd.lovePreset, timeSec: 0, apiVer: 1 }),
+        }).catch(() => {});
+      } else if (cmd.loveVibe != null) {
+        const v = clamp(cmd.loveVibe, 0, 20);
+        const t = clamp(cmd.loveThrust || 0, 0, 20);
+        loveCmd(v <= 0 && t <= 0 ? "Stop" : ("Vibrate:" + v + ",Thrusting:" + t), 0);
+      }
+    }
+  }
+  function stopToys() {
+    applyToy(0);
+    if (toys.handyOn) handyQ(async () => handyReq("PUT", "/hamp/stop"));
+    if (toys.loveOn) loveCmd("Stop", 0);
+  }
+
+  function canPlace(board, x, y, len, dir) {
+    for (let i = 0; i < len; i++) {
+      const cx = x + (dir ? 0 : i), cy = y + (dir ? i : 0);
+      if (cx < 0 || cy < 0 || cx >= N || cy >= N || board[cy][cx].ship !== -1) return false;
+    }
+    return true;
+  }
+  function stampOn(side, x, y, len, dir, id) {
+    const cells = [];
+    for (let i = 0; i < len; i++) {
+      const cx = x + (dir ? 0 : i), cy = y + (dir ? i : 0);
+      side.board[cy][cx].ship = id; cells.push({ x: cx, y: cy });
+    }
+    side.ships[id] = { ...FLEET[id], cells, hits: 0, sunk: false };
+  }
+  function stamp(x, y, len, dir, id) { stampOn(me, x, y, len, dir, id); }
+  function fillFleet(side) {
+    side.board = empty(); side.ships = [];
+    FLEET.forEach((s, id) => {
+      for (let n = 0; n < 500; n++) {
+        const dir = Math.random() < 0.5 ? 0 : 1;
+        const x = Math.floor(Math.random() * N), y = Math.floor(Math.random() * N);
+        if (canPlace(side.board, x, y, s.len, dir)) { stampOn(side, x, y, s.len, dir, id); break; }
+      }
+    });
+  }
+  function autoPlace() {
+    fillFleet(me);
+    game.next = FLEET.length;
+  }
+
+  function resetBoards() {
+    them.shots = empty();
+    game.pendingOver = null;
+    game.control = null; panel.classList.remove("show"); taken.classList.remove("show");
+    hideResult();
+    fillFleet(me);
+    me.ready = true; game.next = FLEET.length;
+    game.phase = them.ready || net.solo ? "battle" : "place";
+    game.turn = net.host ? "self" : "wait";
+    game.msg = game.phase === "battle"
+      ? (net.host ? "Fleets deployed. Your shot." : "Fleets deployed. Waiting for their shot.")
+      : "Fleet deployed. Waiting for opponent.";
+    game.view = game.phase === "battle" ? (net.host ? "fire" : "defend") : "defend";
+    game.viewTo = game.view; game.viewFade = 1;
+    game.weapon = "single";
+    rollPowers();
+    syncWeaponBtns();
+    send({ type: "ready" });
+  }
+
+  function patternCells(x, y, kind) {
+    const pts = [];
+    const add = (cx, cy) => {
+      if (cx >= 0 && cy >= 0 && cx < N && cy < N) pts.push({ x: cx, y: cy });
+    };
+    if (kind === "cross") {
+      for (let i = -1; i <= 1; i++) { add(x + i, y); add(x, y + i); }
+    } else if (kind === "bomb") {
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 2; dy++) add(x + dx, y + dy);
+    } else if (kind === "control") {
+      for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) add(x + dx, y + dy);
+    } else add(x, y);
+    const seen = new Set();
+    return pts.filter((p) => { const k = p.x + "," + p.y; if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+  function rollPowers() {
+    const pool = ["cross", "bomb", "control"];
+    game.ammo = { cross: 0, bomb: 0, control: 0 };
+    const picks = [
+      pool[Math.floor(Math.random() * pool.length)],
+      pool[Math.floor(Math.random() * pool.length)],
+    ];
+    picks.forEach((k) => { game.ammo[k] += 1; });
+    const names = { cross: "Cross", bomb: "Bomb", control: "Control 5×5" };
+    game.powerNote = picks.map((k) => names[k]).join(" + ");
+    game.msg = (game.msg || "") + " Power-ups: " + game.powerNote + ".";
+  }
+  function syncWeaponBtns() {
+    const map = { single: "wSingle", cross: "wCross", bomb: "wBomb", control: "wControl" };
+    Object.keys(map).forEach((k) => {
+      const el = document.getElementById(map[k]);
+      if (!el) return;
+      el.classList.toggle("ok", game.weapon === k);
+      if (k !== "single") el.textContent = (k === "cross" ? "Cross" : k === "bomb" ? "Bomb" : "Ctrl") + " ×" + game.ammo[k];
+      el.disabled = k !== "single" && game.ammo[k] <= 0;
+      if (k !== "single") el.style.display = game.ammo[k] > 0 ? "" : "none";
+    });
+  }
+
+  function resolveShot(side, x, y) {
+    const cell = side.board[y][x];
+    if (cell.shot) return { res: "dup" };
+    if (cell.ship === -1) { cell.shot = 1; return { res: "miss" }; }
+    cell.shot = 2;
+    const ship = side.ships[cell.ship];
+    ship.hits += 1;
+    if (ship.hits >= ship.len) {
+      ship.sunk = true;
+      ship.cells.forEach((c) => { side.board[c.y][c.x].shot = 3; });
+      return { res: "sunk", name: ship.name, cells: ship.cells };
+    }
+    return { res: "hit" };
+  }
+  function incomingShot(x, y) {
+    return resolveShot(me, x, y);
+  }
+  function fmtClock(s) {
+    s = Math.max(0, Math.ceil(s));
+    const m = Math.floor(s / 60), r = s % 60;
+    return m + ":" + String(r).padStart(2, "0");
+  }
+  function addChat(who, text) {
+    const el = document.createElement("div");
+    el.className = who;
+    el.textContent = (who === "me" ? "You: " : "Them: ") + text;
+    const log = document.getElementById("chatLog");
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+  }
+  function layoutControl() {
+    document.getElementById("handyPane").classList.toggle("show", !!them.handy);
+    document.getElementById("lovePane").classList.toggle("show", !!them.love);
+  }
+  function controlPayload() {
+    return {
+      type: "control",
+      left: game.control ? Math.ceil(game.control.t) : 0,
+      handyVel: Number(document.getElementById("handyVel").value),
+      handyMax: Number(document.getElementById("handyStroke").value),
+      loveVibe: Number(document.getElementById("loveVibe").value),
+      loveThrust: Number(document.getElementById("loveThrust").value),
+      lovePreset: game.control && game.control.preset || null,
+    };
+  }
+  function hideResult() {
+    const el = document.getElementById("result");
+    el.classList.remove("show", "win", "lose");
+  }
+  function showResult(won, why) {
+    const el = document.getElementById("result");
+    el.classList.remove("win", "lose");
+    el.classList.add("show", won ? "win" : "lose");
+    document.getElementById("resultTitle").textContent = won ? "You won" : "You lost";
+    document.getElementById("resultWhy").textContent = why || (won ? "Their fleet is gone." : "Your fleet is gone.");
+    panel.classList.remove("show");
+    taken.classList.remove("show");
+  }
+  function startControl(asAttacker, seconds) {
+    const dur = Math.max(1, seconds || 30);
+    game.control = { mine: asAttacker, t: dur, max: dur, preset: null, started: false };
+    if (asAttacker) {
+      layoutControl();
+      panel.classList.add("show");
+      taken.classList.remove("show");
+    } else {
+      panel.classList.remove("show");
+      taken.classList.add("show");
+    }
+  }
+  function endControl() {
+    if (!game.control) return;
+    const wasMine = game.control.mine;
+    game.control = null;
+    panel.classList.remove("show");
+    taken.classList.remove("show");
+    if (game.pendingOver) {
+      game.phase = "over";
+      const won = game.pendingOver === "win";
+      game.msg = won ? "You sank their last ship." : "Your fleet is gone.";
+      if (!wasMine) stopToys();
+      showResult(won, game.msg);
+      return;
+    }
+    if (wasMine) {
+      send({ type: "controlEnd" });
+      game.turn = "wait";
+      game.msg = "Control ended. Their shot.";
+      if (net.solo) setTimeout(cpuFire, 4200);
+    } else {
+      stopToys();
+      game.turn = "self";
+      game.msg = "Your shot.";
+    }
+  }
+
+  function takeSalvo(asAttacker, kind, results) {
+    let hits = 0, sinks = [];
+    results.forEach((r) => {
+      if (asAttacker && them.shots[r.y] && them.shots[r.y][r.x]) {
+        if (r.res === "miss" && them.shots[r.y][r.x].shot === 0) them.shots[r.y][r.x].shot = 1;
+        if (r.res === "hit") them.shots[r.y][r.x].shot = 2;
+        if (r.res === "sunk") (r.cells || [{ x: r.x, y: r.y }]).forEach((c) => { if (them.shots[c.y]) them.shots[c.y][c.x].shot = 3; });
+      }
+      if (r.res === "hit") hits += 1;
+      if (r.res === "sunk") sinks.push(r);
+    });
+    const sinkSecs = sinks.reduce((sum, s) => sum + 60 * ((s.cells && s.cells.length) || 3), 0);
+    let secs = 0;
+    if (kind === "control") secs = 60 + hits * 30 + sinkSecs;
+    else if (sinkSecs) secs = sinkSecs;
+    else if (hits) secs = 30;
+    if (asAttacker) {
+      if (sinks.length) game.msg = "Salvo sank " + sinks.map((s) => s.name).join(", ") + ".";
+      else if (hits) game.msg = "Salvo hit " + hits + ".";
+      else game.msg = kind === "control" ? "Control shot missed — you still get 1:00." : "Miss.";
+      if (secs) startControl(true, secs);
+      else { game.turn = "wait"; if (net.solo) setTimeout(cpuFire, 4200); }
+    } else {
+      if (sinks.length) game.msg = "They sank " + sinks.map((s) => s.name).join(", ") + ".";
+      else if (hits) game.msg = "They hit you.";
+      else game.msg = kind === "control" ? "Control shot missed — they still get 1:00." : "They missed.";
+      if (me.ships.length && me.ships.every((s) => s.sunk)) { game.pendingOver = "lose"; send({ type: "win" }); }
+      if (secs) startControl(false, secs);
+      else game.turn = "self";
+    }
+  }
+
+  function onMsg(msg) {
+    if (!msg || !msg.type) return;
+    if (game.paused && msg.type !== "hello" && msg.type !== "resume" && msg.type !== "resumeAck" && msg.type !== "toys") return;
+    if (msg.type === "hello" || msg.type === "resume") {
+      send({ type: "toys", handy: !!toys.handyOn, love: !!toys.loveOn });
+      if (msg.type === "hello" && game.phase === "lobby") {
+        game.msg = "Connected. Fleets deploying.";
+        resetBoards();
+      } else {
+        unpause("Reconnected.");
+        send({ type: "resumeAck" });
+      }
+    }
+    if (msg.type === "resumeAck") unpause("Opponent is back.");
+    if (msg.type === "toys") {
+      them.handy = !!msg.handy;
+      them.love = !!msg.love;
+    }
+    if (msg.type === "ready") {
+      them.ready = true;
+      if (me.ready) { game.phase = "battle"; game.msg = net.host ? "Your shot." : "Waiting for their shot."; game.turn = net.host ? "self" : "wait"; }
+    }
+    if (msg.type === "shot") {
+      const kind = msg.kind || "single";
+      const results = patternCells(msg.x, msg.y, kind).map((p) => ({ x: p.x, y: p.y, ...resolveShot(me, p.x, p.y) }));
+      send({ type: "salvo", kind, results });
+      takeSalvo(false, kind, results);
+    }
+    if (msg.type === "salvo") takeSalvo(true, msg.kind || "single", msg.results || []);
+    if (msg.type === "result") takeSalvo(true, "single", [{ x: msg.x, y: msg.y, res: msg.res, name: msg.name, cells: msg.cells }]);
+    if (msg.type === "chat") addChat("them", String(msg.text || "").slice(0, 160));
+    if (msg.type === "control") {
+      applyControl(msg);
+      if (game.control && !game.control.mine && msg.left != null) game.control.t = msg.left;
+    }
+    if (msg.type === "controlEnd") endControl();
+    if (msg.type === "win") {
+      game.pendingOver = "win";
+      if (!game.control) { game.phase = "over"; game.msg = "You sank their last ship."; stopToys(); showResult(true, game.msg); }
+      else game.msg = "Last ship is down. Control until the timer ends.";
+    }
+    if (msg.type === "surrender") {
+      stopToys();
+      game.control = null; panel.classList.remove("show"); taken.classList.remove("show");
+      game.phase = "over"; game.pendingOver = "win";
+      game.msg = "They surrendered. You win.";
+      showResult(true, "They surrendered.");
+    }
+    if (msg.type === "rematch") {
+      stopToys();
+      resetBoards();
+      game.msg = "Rematch. Place fleets again.";
+    }
+  }
+
+  function cpuHear(msg) {
+    if (!msg || !msg.type) return;
+    if (msg.type === "ready") {
+      them.ready = true;
+      onMsg({ type: "ready" });
+    }
+    if (msg.type === "shot") {
+      const kind = msg.kind || "single";
+      const results = patternCells(msg.x, msg.y, kind).map((p) => ({ x: p.x, y: p.y, ...resolveShot(cpu, p.x, p.y) }));
+      onMsg({ type: "salvo", kind, results });
+    }
+    if (msg.type === "chat") onMsg({ type: "chat", text: "CPU: copy that." });
+    if (msg.type === "rematch") {
+      fillFleet(cpu); cpu.hunt = [];
+      onMsg({ type: "rematch" });
+      them.ready = true;
+    }
+  }
+  function cpuFire() {
+    if (!net.solo || game.phase === "over" || game.control) return;
+    if (game.turn !== "wait") return;
+    let x, y, found = false;
+    while (cpu.hunt.length && !found) {
+      const n = cpu.hunt.pop();
+      if (!me.board[n.y][n.x].shot) { x = n.x; y = n.y; found = true; }
+    }
+    while (!found) {
+      x = Math.floor(Math.random() * N);
+      y = Math.floor(Math.random() * N);
+      if (!me.board[y][x].shot) found = true;
+    }
+    onMsg({ type: "shot", x, y });
+    if (me.board[y][x].shot >= 2) {
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dx, dy]) => {
+        const nx = x + dx, ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < N && ny < N && !me.board[ny][nx].shot) cpu.hunt.push({ x: nx, y: ny });
+      });
+    }
+  }
+  function startSolo() {
+    net.solo = true; net.host = true; net.conn = null;
+    setStatus("Solo test vs CPU");
+    them.ready = true;
+    resetBoards();
+    fillFleet(cpu); cpu.hunt = [];
+    game.phase = "battle"; game.turn = "self";
+    game.view = "fire"; game.viewTo = "fire"; game.viewFade = 1;
+    game.msg = "Solo practice. Fleets placed. Fire when ready.";
+    addChat("them", "CPU ready. I will shoot back after misses and after control ends.");
+  }
+
+  function pauseNet(why) {
+    if (net.solo || !net.matched) return;
+    game.paused = true;
+    stopToys();
+    document.getElementById("paused").classList.add("show");
+    document.getElementById("pausedWhy").textContent = why || "Connection lost. Pausing until both sides return.";
+    setStatus("Paused — reconnecting");
+  }
+  function unpause(msg) {
+    game.paused = false;
+    document.getElementById("paused").classList.remove("show");
+    if (msg) setStatus(msg);
+  }
+  function onDrop() {
+    net.conn = null;
+    if (!net.matched) { setStatus("Did not connect — try Join again"); return; }
+    pauseNet("Opponent dropped. Auto-reconnect on…");
+    if (!net.host) retryJoin();
+  }
+  function bindLive(c) {
+    net.conn = c;
+    c.on("data", onMsg);
+    c.on("close", onDrop);
+  }
+  function hostRoom() {
+    const code = code6();
+    document.getElementById("room").value = code;
+    net.code = code; net.host = true; net.matched = false;
+    setStatus("Opening room " + code + "…");
+    if (net.peer) { try { net.peer.destroy(); } catch (e) {} }
+    net.peer = new Peer("fr" + code, peerOpts());
+    net.peer.on("open", () => {
+      setStatus("Room " + code + " ready — they can Join");
+      history.replaceState({}, "", "?room=" + code);
+    });
+    net.peer.on("error", (e) => setStatus("Host error: " + (e.type || e)));
+    net.peer.on("connection", (c) => {
+      const go = () => {
+        bindLive(c);
+        if (!net.matched) {
+          net.matched = true;
+          send({ type: "hello" });
+          resetBoards();
+          setStatus("Opponent joined " + code);
+        } else {
+          send({ type: "resume" });
+          unpause("Opponent reconnected");
+        }
+      };
+      c.on("open", go);
+      if (c.open) go();
+    });
+  }
+  function retryJoin() {
+    if (net.host || !net.code) return;
+    clearTimeout(net.retry);
+    net.retry = setTimeout(() => joinRoom(true), 1500);
+  }
+  function joinRoom(isRetry) {
+    const code = (document.getElementById("room").value.trim().toUpperCase() || net.code || "");
+    if (code.length < 4) { setStatus("Enter the host room code first"); return; }
+    net.code = code; net.host = false;
+    setStatus((isRetry || net.tries ? "Retrying " : "Joining ") + code + "…");
+    if (!isRetry) { net.matched = false; net.tries = 0; }
+    if (!net.peer || net.peer.destroyed) {
+      net.peer = new Peer(peerOpts());
+      net.peer.on("error", (e) => {
+        setStatus("Join error: " + (e.type || e));
+        if (e.type === "peer-unavailable" || e.type === "network" || e.type === "disconnected") retryJoin();
+      });
+      net.peer.on("open", () => linkToHost());
+    } else if (net.peer.id) linkToHost();
+    else net.peer.on("open", () => linkToHost());
+  }
+  function linkToHost() {
+    net.tries = (net.tries || 0) + 1;
+    if (net.tries > 12) { setStatus("Could not reach host. They must click Host first."); return; }
+    try {
+      const c = net.peer.connect("fr" + net.code, { reliable: true, serialization: "json" });
+      const go = () => {
+        bindLive(c);
+        if (!net.matched) {
+          net.matched = true;
+          send({ type: "hello" });
+          setStatus("Joined " + net.code);
+        } else {
+          send({ type: "resume" });
+          unpause("Reconnected " + net.code);
+        }
+      };
+      c.on("open", go);
+      c.on("error", () => retryJoin());
+    } catch (e) { retryJoin(); }
+  }
+
+  function screenMode() {
+    if (game.phase === "place" || game.phase === "lobby") return "place";
+    if (game.control && game.control.mine) return "fire";
+    if (game.control && !game.control.mine) return "defend";
+    if (game.turn === "self" || game.turn === "lock") return "fire";
+    return "defend";
+  }
+  function gridOrigin() {
+    const size = N * CELL;
+    return { x: Math.floor((W - size) / 2), y: 44 };
+  }
+  function cellAt(mx, my) {
+    const o = gridOrigin();
+    const x = Math.floor((mx - o.x) / CELL), y = Math.floor((my - o.y) / CELL);
+    if (x < 0 || y < 0 || x >= N || y >= N) return null;
+    return { x, y };
+  }
+
+  function shipAt(board, x, y) {
+    if (x < 0 || y < 0 || x >= N || y >= N) return -2;
+    return board[y][x].ship;
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  function drawHull(origin, ship) {
+    if (!ship || !ship.cells || !ship.cells.length) return;
+    const cells = ship.cells;
+    const horiz = cells.length < 2 || cells[0].y === cells[cells.length - 1].y;
+    const xs = cells.map((c) => c.x), ys = cells.map((c) => c.y);
+    const minx = Math.min.apply(null, xs), maxx = Math.max.apply(null, xs);
+    const miny = Math.min.apply(null, ys), maxy = Math.max.apply(null, ys);
+    const x = origin.x + minx * CELL + 5;
+    const y = origin.y + miny * CELL + 5;
+    const w = (maxx - minx + 1) * CELL - 10;
+    const h = (maxy - miny + 1) * CELL - 10;
+    const sunk = !!ship.sunk;
+    const hit = ship.hits > 0 && !sunk;
+    ctx.save();
+    ctx.fillStyle = sunk ? "#4a1820" : hit ? "#3a4450" : "#5b6d78";
+    ctx.strokeStyle = sunk ? "#ff8a96" : "#d7e6ee";
+    ctx.lineWidth = 1.6;
+    roundRect(x, y, w, h, Math.min(horiz ? h : w, CELL) * 0.42);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = sunk ? "#2a0c12" : "#2c3842";
+    if (horiz) {
+      roundRect(x + 8, y + 4, w - 16, h - 8, 4);
+      ctx.fill();
+      ctx.fillStyle = sunk ? "#e07070" : "#9fd4e8";
+      for (let i = 0; i < ship.len; i++) ctx.fillRect(x + 10 + i * (CELL - 2), y + h * 0.32, 8, 5);
+    } else {
+      roundRect(x + 4, y + 8, w - 8, h - 16, 4);
+      ctx.fill();
+      ctx.fillStyle = sunk ? "#e07070" : "#9fd4e8";
+      for (let i = 0; i < ship.len; i++) ctx.fillRect(x + w * 0.32, y + 10 + i * (CELL - 2), 5, 8);
+    }
+    ctx.restore();
+  }
+  function markX(px, py, color) {
+    const mid = Math.floor(CELL / 2);
+    ctx.strokeStyle = color; ctx.lineWidth = 2.4; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(px + mid - 7, py + mid - 7); ctx.lineTo(px + mid + 7, py + mid + 7);
+    ctx.moveTo(px + mid + 7, py + mid - 7); ctx.lineTo(px + mid - 7, py + mid + 7);
+    ctx.stroke();
+  }
+  function drawGrid(board, origin, reveal) {
+    const mid = Math.floor(CELL / 2);
+    const size = N * CELL;
+    ctx.fillStyle = "#08202b";
+    ctx.fillRect(origin.x - 18, origin.y - 22, size + 36, size + 40);
+    ctx.strokeStyle = "#3a7a88";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(origin.x - 2, origin.y - 2, size + 2, size + 2);
+    ctx.fillStyle = "#8fb8c6"; ctx.font = "11px sans-serif";
+    for (let i = 0; i < N; i++) {
+      ctx.fillText(String.fromCharCode(65 + i), origin.x + i * CELL + mid - 4, origin.y - 8);
+      ctx.fillText(String(i + 1), origin.x - 18, origin.y + i * CELL + mid + 4);
+    }
+    if (!board) return;
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const px = origin.x + x * CELL, py = origin.y + y * CELL;
+      ctx.fillStyle = ((x + y) % 2) ? "#0b2a36" : "#0a2532";
+      ctx.fillRect(px, py, CELL, CELL);
+      ctx.strokeStyle = "rgba(70,130,150,0.22)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 0.5, py + 0.5, CELL - 1, CELL - 1);
+    }
+    if (reveal && me.ships) me.ships.forEach((s) => drawHull(origin, s));
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const px = origin.x + x * CELL, py = origin.y + y * CELL, cell = board[y][x];
+      if (cell.shot === 1) {
+        ctx.strokeStyle = "rgba(200,230,240,0.55)"; ctx.lineWidth = 1.4;
+        ctx.beginPath(); ctx.arc(px + mid, py + mid, 7, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (cell.shot === 2) markX(px, py, "#ff4d5a");
+      if (cell.shot === 3 && !reveal) markX(px, py, "#ff8a96");
+    }
+  }
+
+  function paintBoard(mode) {
+    const o = gridOrigin();
+    if (mode === "fire") drawGrid(them.shots, o, false);
+    else drawGrid(me.board, o, true);
+  }
+  function titleFor(mode) {
+    if (mode === "fire") return ["#8fd0b8", "THEIR WATERS  ·  your shot"];
+    if (mode === "place") return ["#8fd0b8", "PLACE YOUR FLEET"];
+    return ["#8fd0b8", "YOUR FLEET  ·  incoming"];
+  }
+  function draw() {
+    const mode = game.view;
+    const o = gridOrigin();
+    const bg = ctx.createRadialGradient(W * 0.5, H * 0.45, 40, W * 0.5, H * 0.5, 520);
+    bg.addColorStop(0, "#0c1c28");
+    bg.addColorStop(1, "#050b10");
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    const t = titleFor(mode);
+    ctx.font = "bold 16px sans-serif";
+    ctx.fillStyle = t[0];
+    ctx.fillText(t[1], 70, 28);
+    ctx.fillStyle = "#7ea0b3"; ctx.font = "14px sans-serif"; ctx.fillText(game.msg, 70, 52);
+    if (game.viewFade < 1 && game.viewTo !== game.view) {
+      ctx.save(); ctx.globalAlpha = 1 - game.viewFade; paintBoard(game.view); ctx.restore();
+      ctx.save(); ctx.globalAlpha = game.viewFade; paintBoard(game.viewTo); ctx.restore();
+    } else paintBoard(mode);
+    if (mode === "fire" && game.hover && game.turn === "self" && !game.control) {
+      const tiles = patternCells(game.hover.x, game.hover.y, game.weapon || "single");
+      ctx.fillStyle = game.weapon === "control" ? "rgba(196,92,122,0.35)" : "rgba(62,207,142,0.35)";
+      tiles.forEach((t) => ctx.fillRect(o.x + t.x * CELL, o.y + t.y * CELL, CELL - 3, CELL - 3));
+    }
+    if (mode === "place" && game.hover && game.next < FLEET.length && me.board) {
+      const spec = FLEET[game.next];
+      const ok = canPlace(me.board, game.hover.x, game.hover.y, spec.len, game.dir);
+      ctx.fillStyle = ok ? "rgba(62,207,142,0.4)" : "rgba(226,75,90,0.4)";
+      for (let i = 0; i < spec.len; i++) {
+        const cx = game.hover.x + (game.dir ? 0 : i), cy = game.hover.y + (game.dir ? i : 0);
+        if (cx >= 0 && cy >= 0 && cx < N && cy < N) ctx.fillRect(o.x + cx * CELL, o.y + cy * CELL, CELL - 3, CELL - 3);
+      }
+    }
+  }
+
+  function pointer(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
+  }
+  canvas.addEventListener("mousemove", (e) => {
+    const p = pointer(e);
+    game.hover = cellAt(p.x, p.y);
+  });
+  canvas.addEventListener("click", (e) => {
+    if (game.paused || game.control) return;
+    const p = pointer(e);
+    if (game.phase === "place") {
+      const c = cellAt(p.x, p.y);
+      if (!c || game.next >= FLEET.length) return;
+      const spec = FLEET[game.next];
+      if (!canPlace(me.board, c.x, c.y, spec.len, game.dir)) return;
+      stamp(c.x, c.y, spec.len, game.dir, game.next);
+      game.next += 1;
+      if (game.next >= FLEET.length) {
+        me.ready = true; send({ type: "ready" });
+        game.msg = them.ready ? "Battle." : "Waiting for opponent to finish placing.";
+        if (them.ready) { game.phase = "battle"; game.turn = net.host ? "self" : "wait"; game.msg = net.host ? "Your shot." : "Waiting for their shot."; }
+      } else game.msg = "Place your " + FLEET[game.next].name + ".";
+      return;
+    }
+    if (game.phase !== "battle" || game.turn !== "self" || screenMode() !== "fire") return;
+    const c = cellAt(p.x, p.y);
+    if (!c) return;
+    const kind = game.weapon || "single";
+    if (kind !== "single" && game.ammo[kind] <= 0) return;
+    const tiles = patternCells(c.x, c.y, kind);
+    if (kind === "single" && them.shots[c.y][c.x].shot) return;
+    if (!tiles.length) return;
+    if (kind !== "single") game.ammo[kind] -= 1;
+    game.weapon = "single";
+    syncWeaponBtns();
+    send({ type: "shot", x: c.x, y: c.y, kind });
+    game.turn = "lock";
+  });
+  window.addEventListener("keydown", (e) => {
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) return;
+    if (e.key === "r" || e.key === "R") game.dir = game.dir ? 0 : 1;
+  });
+  document.getElementById("chatForm").onsubmit = (e) => {
+    e.preventDefault();
+    const box = document.getElementById("chatIn");
+    const text = box.value.trim();
+    if (!text) return;
+    box.value = "";
+    addChat("me", text);
+    send({ type: "chat", text });
+  };
+
+  function inviteUrl() {
+    const code = (net.code || document.getElementById("room").value.trim()).toUpperCase();
+    const u = new URL(location.href);
+    u.search = code ? ("room=" + code) : "";
+    return u.toString();
+  }
+  document.getElementById("hostBtn").onclick = hostRoom;
+  document.getElementById("joinBtn").onclick = joinRoom;
+  document.getElementById("copyBtn").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteUrl());
+      setStatus("Invite copied");
+    } catch (e) { setStatus(inviteUrl()); }
+  };
+  document.getElementById("rematchBtn").onclick = () => {
+    doRematch();
+    game.msg = "Rematch. Place fleets again.";
+  };
+  const testBtn = document.getElementById("testBtn");
+  if (testBtn) testBtn.onclick = async () => {
+    applyToy(35);
+    setTimeout(() => applyToy(0), 2500);
+    setStatus("Test pulse 2.5s at 35%");
+  };
+  document.querySelectorAll("[data-w]").forEach((b) => {
+    b.onclick = () => {
+      const w = b.dataset.w;
+      if (w !== "single" && game.ammo[w] <= 0) return;
+      game.weapon = w;
+      syncWeaponBtns();
+    };
+  });
+  const soloBtn = document.getElementById("soloBtn");
+  if (soloBtn) soloBtn.onclick = startSolo;
+  function previewKind(handy, love) {
+    them.handy = handy; them.love = love;
+    game.msg = handy ? "Preview: Handy control (speed + stroke)." : "Preview: Lovense control (vibrate + patterns).";
+    startControl(true, 30);
+  }
+  const previewHandyBtn = document.getElementById("previewHandyBtn");
+  const previewLoveBtn = document.getElementById("previewLoveBtn");
+  if (previewHandyBtn) previewHandyBtn.onclick = () => previewKind(true, false);
+  if (previewLoveBtn) previewLoveBtn.onclick = () => previewKind(false, true);
+  document.getElementById("toyBtn").onclick = connectToys;
+  document.getElementById("stopBtn").onclick = stopToys;
+  document.getElementById("placeBtn").onclick = () => {
+    if (game.phase !== "place") return;
+    autoPlace(); me.ready = true; send({ type: "ready" });
+    game.msg = them.ready ? "Battle." : "Waiting for opponent to finish placing.";
+    if (them.ready) { game.phase = "battle"; game.turn = net.host ? "self" : "wait"; }
+  };
+  function pushControl() {
+    if (!(game.control && game.control.mine)) return;
+    const p = controlPayload();
+    document.getElementById("handyVelLab").textContent = p.handyVel + "%";
+    document.getElementById("handyStrokeLab").textContent = "0–" + p.handyMax;
+    document.getElementById("loveVibeLab").textContent = p.loveVibe;
+    document.getElementById("loveThrustLab").textContent = p.loveThrust;
+    if (game.control.started) send(p);
+  }
+  ["handyVel", "handyStroke", "loveVibe", "loveThrust"].forEach((id) => {
+    document.getElementById(id).oninput = pushControl;
+  });
+  document.querySelectorAll("#panel [data-pre]").forEach((b) => {
+    b.onclick = () => {
+      if (game.control) game.control.preset = b.dataset.pre;
+      pushControl();
+      if (game.control) game.control.preset = null;
+    };
+  });
+  document.getElementById("panelStart").onclick = () => {
+    if (!(game.control && game.control.mine)) return;
+    game.control.started = true;
+    send(controlPayload());
+  };
+  document.getElementById("panelDone").onclick = () => { if (game.control && game.control.mine) endControl(); };
+  document.getElementById("surrenderBtn").onclick = () => {
+    if (!(game.control && !game.control.mine)) return;
+    stopToys();
+    send({ type: "surrender" });
+    game.control = null; panel.classList.remove("show"); taken.classList.remove("show");
+    game.phase = "over"; game.pendingOver = "lose";
+    game.msg = "You surrendered.";
+    showResult(false, "You surrendered.");
+  };
+  function doRematch() {
+    stopToys();
+    if (net.solo) { startSolo(); return; }
+    if (!net.conn) return;
+    send({ type: "rematch" });
+    resetBoards();
+    game.msg = "Rematch. Fleets redeployed.";
+  }
+  document.getElementById("resultRematch").onclick = doRematch;
+  window.addEventListener("beforeunload", stopToys);
+
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const want = screenMode();
+    if (want !== game.viewTo) { game.viewTo = want; game.viewFade = 0; }
+    if (game.view !== game.viewTo) {
+      game.viewFade = Math.min(1, game.viewFade + dt / 4);
+      if (game.viewFade >= 1) { game.view = game.viewTo; game.viewFade = 1; }
+    }
+    if (game.control && !game.paused) {
+      game.control.t -= dt;
+      const left = Math.max(0, Math.ceil(game.control.t));
+      document.getElementById("panelTime").textContent = fmtClock(left) + " left";
+      document.getElementById("takenTime").textContent = fmtClock(left);
+      document.getElementById("panelFill").style.width = (game.control.t / game.control.max * 100) + "%";
+      if (game.control.mine && game.control.started && Math.floor(now / 250) !== Math.floor((now - dt * 1000) / 250)) {
+        send(controlPayload());
+      }
+      if (game.control.t <= 0) endControl();
+    }
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const r = canvas.getBoundingClientRect();
+    const cw = Math.max(1, Math.floor(r.width * dpr)), ch = Math.max(1, Math.floor(r.height * dpr));
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+    ctx.setTransform(cw / W, 0, 0, ch / H, 0, 0);
+    draw();
+    hudL.textContent = screenMode().toUpperCase() + (game.control ? "  CONTROL" : "");
+    hudR.textContent = (toys.handyOn ? "Handy " : "") + (toys.loveOn ? "Lovense " : "") + Math.round(game.intensity) + "%";
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  const q = new URLSearchParams(location.search).get("room");
+  if (q) {
+    document.getElementById("room").value = q.toUpperCase();
+    setStatus("Invite loaded — click Join");
+  }
+})();
+</script>
+</body>
+</html>
